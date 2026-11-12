@@ -1,8 +1,44 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
+import { removeBackground } from '@imgly/background-removal';
+
+async function enhanceImageCanvas(dataUrl, action) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = action === 'hd-upscale' ? 2 : 1;
+      const w = img.width * scale;
+      const h = img.height * scale;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+
+      if (action === 'lighting-boost') {
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.min(255, data[i] * 1.12 + 12);
+          data[i + 1] = Math.min(255, data[i + 1] * 1.12 + 12);
+          data[i + 2] = Math.min(255, data[i + 2] * 1.12 + 12);
+        }
+        ctx.putImageData(imageData, 0, 0);
+      }
+
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('Failed to decode uploaded image'));
+    img.src = dataUrl;
+  });
+}
 
 export default function StudioView({
+  user,
   studioImg,
   setStudioImg,
   processedImg,
@@ -20,26 +56,71 @@ export default function StudioView({
   triggerToast,
 }) {
   const fileInputRef = useRef(null);
+  const [progress, setProgress] = useState(0);
 
   const runAIProcessing = async () => {
     if (!studioImg) {
       alert('Please upload an image first!');
       return;
     }
+    if (!user?.email) {
+      alert('Please sign in to process and save images.');
+      return;
+    }
     if (!deductCredit()) return;
 
     setIsProcessing(true);
-
-    if (selectedAction === 'bg-remove') setStatusText('Isolating portrait subject...');
-    else if (selectedAction === 'hd-upscale') setStatusText('Re-synthesizing 4K pixel detail...');
-    else setStatusText('Rebalancing shadow highlights...');
+    setProgress(5);
 
     try {
+      let outputImage = studioImg;
+
+      if (selectedAction === 'bg-remove') {
+        setStatusText('Initializing AI segmentation model...');
+        const blob = await removeBackground(studioImg, {
+          model: 'isnet_quint8',
+          progress: (key, current, total) => {
+            if (total > 0) {
+              // Map model download/inference across 10% -> 85%
+              const rawPct = Math.round((current / total) * 100);
+              const scaledPct = Math.min(85, Math.max(10, Math.round(10 + rawPct * 0.75)));
+              setProgress(scaledPct);
+              const label = key.includes('fetch') ? 'Downloading AI model' : 'Processing subject';
+              setStatusText(`${label} (${rawPct}%)...`);
+            } else {
+              setStatusText('Isolating subject...');
+            }
+          },
+        });
+
+        setProgress(88);
+        setStatusText('Encoding transparent PNG...');
+        outputImage = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+      } else if (selectedAction === 'hd-upscale') {
+        setProgress(40);
+        setStatusText('Re-synthesizing 4K pixel detail (40%)...');
+        outputImage = await enhanceImageCanvas(studioImg, 'hd-upscale');
+        setProgress(85);
+      } else {
+        setProgress(40);
+        setStatusText('Rebalancing shadow highlights (40%)...');
+        outputImage = await enhanceImageCanvas(studioImg, 'lighting-boost');
+        setProgress(85);
+      }
+
+      setProgress(92);
+      setStatusText('Saving to your personal gallery (92%)...');
+
       const response = await fetch('/api/remove-bg', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: studioImg,
+          email: user.email,
+          imageBase64: outputImage,
           type: selectedAction,
         }),
       });
@@ -47,10 +128,13 @@ export default function StudioView({
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Backend processing failed');
+        throw new Error(data.error || 'Backend saving failed');
       }
 
-      const finalUrl = data.newItem.processedUrl || data.newItem.originalUrl;
+      setProgress(100);
+      setStatusText('Completed (100%)!');
+
+      const finalUrl = data.newItem.processedUrl || outputImage;
       setProcessedImg(finalUrl);
 
       setGallery([
@@ -67,9 +151,10 @@ export default function StudioView({
       if (triggerToast) triggerToast('AI processing completed & saved to database!');
     } catch (err) {
       console.error('Processing error:', err);
-      alert(err.message || 'Processing failed. Please check your server console.');
+      alert(err.message || 'Processing failed.');
     } finally {
       setIsProcessing(false);
+      setTimeout(() => setProgress(0), 600);
     }
   };
 
@@ -216,21 +301,32 @@ export default function StudioView({
             </div>
           </div>
 
-          {/* Process Button */}
-          <button
-            onClick={runAIProcessing}
-            disabled={isProcessing}
-            className="w-full py-4 rounded-xl font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 transition text-white shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {isProcessing ? (
-              <>
-                <span className="animate-spin">⚙️</span>
-                <span>{statusText}</span>
-              </>
-            ) : (
-              <span>⚡ Process Image Now</span>
+          {/* Process Button + Inline Progress Bar */}
+          <div className="space-y-2.5">
+            <button
+              onClick={runAIProcessing}
+              disabled={isProcessing}
+              className="w-full py-4 rounded-xl font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 transition text-white shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isProcessing ? (
+                <>
+                  <span className="animate-spin">⚙️</span>
+                  <span>{statusText}</span>
+                </>
+              ) : (
+                <span>⚡ Process Image Now</span>
+              )}
+            </button>
+
+            {isProcessing && (
+              <div className="w-full bg-gray-800/80 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-purple-500 to-blue-500 h-full transition-all duration-300 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
             )}
-          </button>
+          </div>
         </div>
 
         {/* Right Live Output Viewer */}
@@ -240,13 +336,27 @@ export default function StudioView({
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               Live Output Viewer
             </span>
+            {isProcessing && (
+              <span className="text-xs font-mono text-purple-400 font-semibold">
+                {progress}%
+              </span>
+            )}
           </div>
 
-          <div className="flex-1 flex items-center justify-center min-h-[380px] bg-[#09090b] rounded-xl border border-gray-800/80 p-4 overflow-hidden relative">
+          <div className="flex-1 flex items-center justify-center min-h-[380px] bg-[#09090b] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:16px_16px] rounded-xl border border-gray-800/80 p-4 overflow-hidden relative">
             {isProcessing ? (
-              <div className="text-center space-y-3">
-                <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-sm text-gray-300 font-medium">{statusText}</p>
+              <div className="w-full max-w-xs text-center space-y-4">
+                <div className="relative w-14 h-14 mx-auto flex items-center justify-center">
+                  <div className="w-14 h-14 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin"></div>
+                  <span className="absolute text-xs font-bold text-white">{progress}%</span>
+                </div>
+                <p className="text-sm text-gray-200 font-medium">{statusText}</p>
+                <div className="w-full bg-gray-800 rounded-full h-2.5 overflow-hidden border border-gray-700/60">
+                  <div
+                    className="bg-gradient-to-r from-purple-500 via-indigo-500 to-blue-500 h-full transition-all duration-300 ease-out"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
               </div>
             ) : processedImg ? (
               <img

@@ -1,117 +1,166 @@
+'use client';
+
 import React, { useState } from 'react';
-import { X, Zap, CreditCard, Lock } from 'lucide-react';
 
-function triggerConfetti() {
-  const canvas = document.createElement('canvas');
-  canvas.style.position = 'fixed';
-  canvas.style.top = '0';
-  canvas.style.left = '0';
-  canvas.style.width = '100vw';
-  canvas.style.height = '100vh';
-  canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = '99999';
-  document.body.appendChild(canvas);
-
-  const ctx = canvas.getContext('2d');
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-
-  const particles = Array.from({ length: 60 }, () => ({
-    x: canvas.width / 2,
-    y: canvas.height * 0.7,
-    vx: (Math.random() - 0.5) * 12,
-    vy: Math.random() * -12 - 4,
-    size: Math.random() * 8 + 4,
-    color: ['#06b6d4', '#6366f1', '#ec4899', '#f59e0b', '#10b981'][Math.floor(Math.random() * 5)],
-    alpha: 1
-  }));
-
-  function animate() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    let active = false;
-
-    particles.forEach((p) => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.3;
-      p.alpha -= 0.015;
-
-      if (p.alpha > 0) {
-        active = true;
-        ctx.globalAlpha = Math.max(0, p.alpha);
-        ctx.fillStyle = p.color;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-
-    if (active) requestAnimationFrame(animate);
-    else canvas.remove();
-  }
-
-  animate();
-}
-
-export default function BillingModal({ isOpen, onClose, addCredits }) {
-  const [selectedPack, setSelectedPack] = useState({ credits: 100, price: 9.99 });
+export default function BillingModal({
+  isOpen,
+  onClose,
+  user,
+  credits,
+  setCredits,
+  triggerConfetti,
+  triggerToast,
+}) {
+  const [selectedPack, setSelectedPack] = useState({
+    credits: 100,
+    amountInInr: 199,
+    label: 'Pro Creator Pack',
+  });
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
+  const packs = [
+    { credits: 25, amountInInr: 79, label: 'Starter Pack', badge: '' },
+    { credits: 100, amountInInr: 199, label: 'Pro Creator Pack', badge: 'MOST POPULAR' },
+    { credits: 300, amountInInr: 499, label: 'Studio Unlimited', badge: 'BEST VALUE' },
+  ];
+
+  const loadRazorpayScript = () =>
+    new Promise((resolve) => {
+      if (window.Razorpay) return resolve(true);
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+
+  const handleRazorpayCheckout = async () => {
+    if (!user?.email) {
+      alert('Please sign in first.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const loaded = await loadRazorpayScript();
+      if (!loaded) throw new Error('Razorpay SDK failed to load');
+
+      const orderRes = await fetch('/api/razorpay/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amountInInr: selectedPack.amountInInr,
+          credits: selectedPack.credits,
+        }),
+      });
+      const orderData = await orderRes.json();
+      if (!orderData.success) throw new Error(orderData.error);
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: 'Pixio AI Studio',
+        description: `${selectedPack.credits} AI Studio Credits`,
+        order_id: orderData.orderId,
+        prefill: {
+          name: user.name || 'Creator',
+          email: user.email,
+        },
+        theme: { color: '#7c3aed' },
+        handler: async function (response) {
+          const verifyRes = await fetch('/api/razorpay/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...response,
+              email: user.email,
+              credits: selectedPack.credits,
+            }),
+          });
+          const verifyData = await verifyRes.json();
+          if (verifyData.success) {
+            setCredits(verifyData.credits);
+            if (triggerConfetti) triggerConfetti();
+            if (triggerToast) {
+              triggerToast(`Payment verified! +${selectedPack.credits} credits added.`);
+            }
+            onClose();
+          } else {
+            alert(verifyData.error || 'Payment verification failed');
+          }
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Unable to start checkout');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-[#12141C] max-w-md w-full rounded-3xl p-6 border border-white/15 space-y-6 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+      <div className="bg-[#121215] border border-gray-800 rounded-2xl max-w-md w-full p-6 text-white shadow-2xl relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer"
+          className="absolute top-4 right-4 text-gray-400 hover:text-white text-sm"
         >
-          <X className="w-5 h-5" />
+          ✕
         </button>
 
-        <div className="text-center space-y-1">
-          <h3 className="text-2xl font-extrabold text-white">Top Up Credits</h3>
-          <p className="text-gray-400 text-xs">Purchase credits for background removals & upscaling.</p>
+        <div className="mb-5">
+          <span className="text-xs font-semibold uppercase tracking-wider text-purple-400">
+            Pixio AI Billing
+          </span>
+          <h2 className="text-xl font-bold mt-1">Top Up Studio Credits</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Current balance: <span className="text-amber-400 font-semibold">{credits} Credits</span>
+          </p>
         </div>
 
-        <div className="space-y-3">
-          {[
-            { credits: 50, price: 4.99 },
-            { credits: 100, price: 9.99, popular: true },
-            { credits: 500, price: 34.99 }
-          ].map((pack) => (
-            <div
-              key={pack.credits}
-              onClick={() => setSelectedPack(pack)}
-              className={`p-4 rounded-2xl border cursor-pointer flex justify-between items-center transition-all ${
-                selectedPack.credits === pack.credits
-                  ? 'border-indigo-500 bg-indigo-500/10'
-                  : 'border-white/10 bg-[#161923]'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <Zap className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-sm text-white">{pack.credits} Credits</span>
+        <div className="space-y-3 mb-6">
+          {packs.map((pack) => {
+            const active = selectedPack.credits === pack.credits;
+            return (
+              <div
+                key={pack.credits}
+                onClick={() => setSelectedPack(pack)}
+                className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                  active
+                    ? 'bg-purple-950/30 border-purple-500'
+                    : 'bg-[#18181b] border-gray-800 hover:border-gray-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-sm">{pack.credits} Credits</p>
+                    {pack.badge && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-600/30 text-purple-300 font-semibold">
+                        {pack.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">{pack.label}</p>
+                </div>
+                <span className="text-lg font-bold text-white">₹{pack.amountInInr}</span>
               </div>
-              <span className="font-extrabold text-indigo-400">${pack.price}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <button
-          onClick={() => {
-            addCredits(selectedPack.credits);
-            onClose();
-            triggerConfetti();
-          }}
-          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold text-sm hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg"
+          onClick={handleRazorpayCheckout}
+          disabled={loading}
+          className="w-full py-3.5 rounded-xl font-semibold bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 transition text-sm disabled:opacity-50"
         >
-          <CreditCard className="w-4 h-4" /> Pay & Add Credits Now
+          {loading ? 'Opening Razorpay...' : `Pay ₹${selectedPack.amountInInr} with Razorpay`}
         </button>
-
-        <div className="flex items-center justify-center gap-2 text-[10px] text-gray-500">
-          <Lock className="w-3 h-3 text-emerald-400" />
-          <span>256-Bit SSL Encrypted Secure Checkout</span>
-        </div>
       </div>
     </div>
   );

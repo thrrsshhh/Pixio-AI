@@ -1,34 +1,61 @@
 import { NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/prisma';
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const body = (await request.json()) as { email?: string; name?: string };
-    const email = body.email?.trim().toLowerCase();
+    const { action, email, password, name } = await req.json();
 
-    if (!email) {
+    if (!email || !password) {
       return NextResponse.json(
-        { success: false, error: 'Email is required' },
+        { success: false, error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
-    const user = await prisma.user.upsert({
-      where: { email },
-      update: {
-        name: body.name || undefined,
-      },
-      create: {
-        email,
-        name: body.name || email.split('@')[0],
-        credits: 10,
-      },
-    });
+    if (action === 'signup') {
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        return NextResponse.json(
+          { success: false, error: 'An account with this email already exists' },
+          { status: 409 }
+        );
+      }
 
-    return NextResponse.json({ success: true, user });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Auth failed';
-    console.error('POST /api/auth error:', message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await prisma.user.create({
+        data: {
+          email,
+          name: name || email.split('@')[0],
+          password: hashedPassword,
+          credits: 10,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        user: { id: user.id, name: user.name, email: user.email, credits: user.credits },
+      });
+    }
+
+    // Login flow
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid email or password' },
+        { status: 401 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      user: { id: user.id, name: user.name, email: user.email, credits: user.credits },
+    });
+  } catch (error) {
+    console.error('Auth error:', error);
+    return NextResponse.json(
+      { success: false, error: 'Authentication failed' },
+      { status: 500 }
+    );
   }
 }

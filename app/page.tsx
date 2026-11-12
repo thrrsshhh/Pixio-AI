@@ -1,19 +1,20 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import HomeView from '@/components/HomeView';
 import StudioView from '@/components/StudioView';
 import EditorCanvas from '@/components/EditorCanvas';
 import DashboardView from '@/components/DashboardView';
-import AuthModal from '@/components/AuthModal';
 import BillingModal from '@/components/BillingModal';
 
 export default function PixioApp() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('home');
   const [credits, setCredits] = useState(10);
-  const [user, setUser] = useState<{ name: string; email: string } | null>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [user, setUser] = useState<{ id?: string; name: string; email: string; credits?: number } | null>(null);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
 
   const [studioImg, setStudioImg] = useState('');
@@ -24,9 +25,33 @@ export default function PixioApp() {
   const [collageSlots, setCollageSlots] = useState(['', '', '', '']);
   const [gallery, setGallery] = useState<any[]>([]);
 
-  // Load saved history from SQLite on startup
+  // 1. Restore logged-in user or redirect to /login
   useEffect(() => {
-    fetch('/api/remove-bg')
+    const savedUser = localStorage.getItem('pixio_user');
+    if (!savedUser) {
+      router.push('/login');
+      return;
+    }
+
+    try {
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      if (typeof parsedUser.credits === 'number') {
+        setCredits(parsedUser.credits);
+      }
+    } catch {
+      localStorage.removeItem('pixio_user');
+      router.push('/login');
+      return;
+    }
+    setIsAuthChecked(true);
+  }, [router]);
+
+  // 2. Load saved history & latest DB credits for the logged-in user
+  useEffect(() => {
+    if (!user?.email) return;
+
+    fetch(`/api/remove-bg?email=${encodeURIComponent(user.email)}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.success && Array.isArray(data.history)) {
@@ -38,26 +63,52 @@ export default function PixioApp() {
               createdAt: new Date(item.createdAt).toLocaleDateString(),
             }))
           );
+        } else {
+          setGallery([]);
+        }
+
+        if (typeof data.credits === 'number') {
+          setCredits(data.credits);
         }
       })
-      .catch((err) => console.error('Failed to load gallery:', err));
-  }, []);
+      .catch((err) => console.error('Failed to load user gallery:', err));
+  }, [user?.email]);
+
+  const updateCreditsAndPersist = (newCredits: number) => {
+    setCredits(newCredits);
+    if (user) {
+      const updatedUser = { ...user, credits: newCredits };
+      setUser(updatedUser);
+      localStorage.setItem('pixio_user', JSON.stringify(updatedUser));
+    }
+  };
 
   const deductCredit = () => {
     if (credits <= 0) {
       alert('Out of credits! Please top up your credits to continue.');
       return false;
     }
-    setCredits((prev) => prev - 1);
+    const next = credits - 1;
+    updateCreditsAndPersist(next);
     return true;
   };
 
   const handleLogout = () => {
     setUser(null);
+    setGallery([]);
+    localStorage.removeItem('pixio_user');
     localStorage.removeItem('user');
     localStorage.removeItem('token');
-    alert('Logged out successfully!');
+    router.push('/login');
   };
+
+  if (!isAuthChecked) {
+    return (
+      <div className="min-h-screen bg-[#090A0F] text-white flex items-center justify-center">
+        <p className="text-gray-400 text-sm">Loading workspace...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#090A0F] text-white flex flex-col font-sans">
@@ -67,7 +118,7 @@ export default function PixioApp() {
         credits={credits}
         openPricingModal={() => setIsBillingModalOpen(true)}
         user={user}
-        openAuthModal={() => setIsAuthModalOpen(true)}
+        openAuthModal={() => router.push('/login')}
         onLogout={handleLogout}
       />
 
@@ -76,6 +127,7 @@ export default function PixioApp() {
 
         {activeTab === 'studio' && (
           <StudioView
+            user={user}
             studioImg={studioImg}
             setStudioImg={setStudioImg}
             processedImg={processedImg}
@@ -91,11 +143,23 @@ export default function PixioApp() {
             setGallery={setGallery}
             triggerConfetti={() => {}}
             triggerToast={(msg: string) => console.log(msg)}
+            onOpenInEditor={(imgUrl: string) => {
+              if (!imgUrl) return;
+              setCollageSlots((prev) => {
+                const next = [...prev];
+                const emptyIdx = next.findIndex((slot) => !slot);
+                if (emptyIdx !== -1) next[emptyIdx] = imgUrl;
+                else next[0] = imgUrl;
+                return next;
+              });
+              setActiveTab('editor');
+            }}
           />
         )}
 
         {activeTab === 'editor' && (
           <EditorCanvas
+            user={user}
             collageSlots={collageSlots}
             setCollageSlots={setCollageSlots}
             gallery={gallery}
@@ -105,6 +169,7 @@ export default function PixioApp() {
 
         {activeTab === 'dashboard' && (
           <DashboardView
+            user={user}
             gallery={gallery}
             setGallery={setGallery}
             setActiveTab={setActiveTab}
@@ -112,16 +177,14 @@ export default function PixioApp() {
         )}
       </main>
 
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthSuccess={(userData: any) => setUser(userData)}
-      />
-
       <BillingModal
         isOpen={isBillingModalOpen}
         onClose={() => setIsBillingModalOpen(false)}
-        addCredits={(amt: number) => setCredits((c) => c + amt)}
+        user={user}
+        credits={credits}
+        setCredits={updateCreditsAndPersist}
+        triggerConfetti={() => {}}
+        triggerToast={(msg: string) => console.log(msg)}
       />
     </div>
   );

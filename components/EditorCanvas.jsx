@@ -78,6 +78,7 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
 }
 
 export default function EditorCanvas({
+  user,
   collageSlots = ['', '', '', '', '', ''],
   setCollageSlots,
   gallery = [],
@@ -234,30 +235,33 @@ export default function EditorCanvas({
       link.click();
       document.body.removeChild(link);
 
-      // 5. Save collage to SQLite database so it reflects in Dashboard
-      try {
-        const saveRes = await fetch('/api/remove-bg', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: dataUrl,
-            type: 'collage',
-          }),
-        });
-        const saveData = await saveRes.json();
-        if (saveData.success && saveData.newItem && setGallery) {
-          setGallery([
-            {
-              id: saveData.newItem.id,
-              url: saveData.newItem.processedUrl || dataUrl,
+      // 5. Save collage to SQLite database under this specific user
+      if (user?.email) {
+        try {
+          const saveRes = await fetch('/api/remove-bg', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: user.email,
+              imageBase64: dataUrl,
               type: 'collage',
-              createdAt: 'Just now',
-            },
-            ...gallery,
-          ]);
+            }),
+          });
+          const saveData = await saveRes.json();
+          if (saveData.success && saveData.newItem && setGallery) {
+            setGallery([
+              {
+                id: saveData.newItem.id,
+                url: saveData.newItem.processedUrl || dataUrl,
+                type: 'collage',
+                createdAt: 'Just now',
+              },
+              ...gallery,
+            ]);
+          }
+        } catch (dbErr) {
+          console.error('Failed to save collage to dashboard history:', dbErr);
         }
-      } catch (dbErr) {
-        console.error('Failed to save collage to dashboard history:', dbErr);
       }
     } catch (err) {
       console.error('Export collage failed:', err);
