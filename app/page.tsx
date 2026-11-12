@@ -4,10 +4,14 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import HomeView from '@/components/HomeView';
-import StudioView from '@/components/StudioView';
-import EditorCanvas from '@/components/EditorCanvas';
-import DashboardView from '@/components/DashboardView';
+import StudioViewRaw from '@/components/StudioView';
+import EditorCanvasRaw from '@/components/EditorCanvas';
+import DashboardViewRaw from '@/components/DashboardView';
 import BillingModal from '@/components/BillingModal';
+
+const StudioView = StudioViewRaw as React.ComponentType<any>;
+const EditorCanvas = EditorCanvasRaw as React.ComponentType<any>;
+const DashboardView = DashboardViewRaw as React.ComponentType<any>;
 
 export default function PixioApp() {
   const router = useRouter();
