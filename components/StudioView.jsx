@@ -1,22 +1,23 @@
-// components/StudioView.jsx
+'use client';
+
 import React, { useRef } from 'react';
 
-export default function StudioView({ 
-  studioImg, 
-  setStudioImg, 
-  processedImg, 
-  setProcessedImg, 
-  selectedAction, 
-  setSelectedAction, 
-  isProcessing, 
-  setIsProcessing, 
-  statusText, 
-  setStatusText, 
-  gallery, 
-  setGallery, 
-  deductCredit, 
-  triggerConfetti, 
-  triggerToast 
+export default function StudioView({
+  studioImg,
+  setStudioImg,
+  processedImg,
+  setProcessedImg,
+  selectedAction,
+  setSelectedAction,
+  isProcessing,
+  setIsProcessing,
+  statusText,
+  setStatusText,
+  gallery,
+  setGallery,
+  deductCredit,
+  triggerConfetti,
+  triggerToast,
 }) {
   const fileInputRef = useRef(null);
 
@@ -33,62 +34,43 @@ export default function StudioView({
     else if (selectedAction === 'hd-upscale') setStatusText('Re-synthesizing 4K pixel detail...');
     else setStatusText('Rebalancing shadow highlights...');
 
-    // Process image locally via HTML5 Canvas to avoid network/package dependencies
-    setTimeout(async () => {
-      try {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = studioImg;
-        
-        await new Promise((resolve, reject) => {
-          img.onload = resolve;
-          img.onerror = reject;
-        });
+    try {
+      const response = await fetch('/api/remove-bg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: studioImg,
+          type: selectedAction,
+        }),
+      });
 
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
+      const data = await response.json();
 
-        if (selectedAction === 'lighting-boost') {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-
-        const processedResultUrl = canvas.toDataURL('image/png');
-        setProcessedImg(processedResultUrl);
-        setIsProcessing(false);
-
-        // Save successfully to your Prisma SQLite database
-        const saveRes = await fetch('/api/history', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            originalUrl: studioImg,
-            processedUrl: processedResultUrl,
-            type: selectedAction
-          })
-        });
-        
-        const saveData = await saveRes.json();
-        if (saveData.success && saveData.newItem) {
-          setGallery([{
-            id: saveData.newItem.id,
-            url: saveData.newItem.processedUrl || saveData.newItem.originalUrl,
-            type: saveData.newItem.type,
-            createdAt: 'Just now'
-          }, ...gallery]);
-        }
-
-        triggerConfetti();
-        triggerToast('AI processing completed & saved to database!');
-      } catch (err) {
-        console.error('Local processing error:', err);
-        setIsProcessing(false);
-        alert('Processing failed. Please try a different image.');
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Backend processing failed');
       }
-    }, 1200);
+
+      const finalUrl = data.newItem.processedUrl || data.newItem.originalUrl;
+      setProcessedImg(finalUrl);
+
+      setGallery([
+        {
+          id: data.newItem.id,
+          url: finalUrl,
+          type: data.newItem.type,
+          createdAt: 'Just now',
+        },
+        ...gallery,
+      ]);
+
+      if (triggerConfetti) triggerConfetti();
+      if (triggerToast) triggerToast('AI processing completed & saved to database!');
+    } catch (err) {
+      console.error('Processing error:', err);
+      alert(err.message || 'Processing failed. Please check your server console.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleFileUpload = (e) => {
@@ -97,7 +79,7 @@ export default function StudioView({
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
         setStudioImg(uploadEvent.target?.result);
-        setProcessedImg(null);
+        setProcessedImg('');
       };
       reader.readAsDataURL(file);
     }
@@ -110,7 +92,7 @@ export default function StudioView({
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
         setStudioImg(uploadEvent.target?.result);
-        setProcessedImg(null);
+        setProcessedImg('');
       };
       reader.readAsDataURL(file);
     }
@@ -119,29 +101,35 @@ export default function StudioView({
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 text-white">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-1">Upload photos to strip backgrounds, sharpen features, or adjust lighting balance.</h1>
+        <h1 className="text-2xl font-bold mb-1">
+          Upload photos to strip backgrounds, sharpen features, or adjust lighting balance.
+        </h1>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left Control Panel */}
         <div className="lg:col-span-5 space-y-6">
           {/* Dropzone */}
-          <div 
+          <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
             className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-purple-500 transition bg-[#18181b]/50"
           >
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileUpload} 
-              accept="image/*" 
-              className="hidden" 
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileUpload}
+              accept="image/*"
+              className="hidden"
             />
             {studioImg ? (
               <div className="space-y-3">
-                <img src={studioImg} alt="Uploaded preview" className="h-32 mx-auto object-cover rounded-lg border border-gray-700" />
+                <img
+                  src={studioImg}
+                  alt="Uploaded preview"
+                  className="h-32 mx-auto object-cover rounded-lg border border-gray-700"
+                />
                 <p className="text-xs text-gray-400">Click or drop to replace image</p>
               </div>
             ) : (
@@ -159,39 +147,72 @@ export default function StudioView({
 
           {/* Select Operation */}
           <div className="space-y-3">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Select Operation</h3>
-            
-            <div 
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Select Operation
+            </h3>
+
+            <div
               onClick={() => setSelectedAction('bg-remove')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${selectedAction === 'bg-remove' ? 'bg-purple-950/30 border-purple-500' : 'bg-[#18181b] border-gray-800 hover:border-gray-700'}`}
+              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                selectedAction === 'bg-remove'
+                  ? 'bg-purple-950/30 border-purple-500'
+                  : 'bg-[#18181b] border-gray-800 hover:border-gray-700'
+              }`}
             >
               <div>
                 <p className="font-medium text-sm text-white">✂️ Remove Background</p>
-                <p className="text-xs text-gray-400 mt-0.5">Isolate subjects on clean transparent PNG</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Isolate subjects on clean transparent PNG
+                </p>
               </div>
-              <input type="radio" checked={selectedAction === 'bg-remove'} readOnly className="accent-purple-500" />
+              <input
+                type="radio"
+                checked={selectedAction === 'bg-remove'}
+                readOnly
+                className="accent-purple-500"
+              />
             </div>
 
-            <div 
+            <div
               onClick={() => setSelectedAction('hd-upscale')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${selectedAction === 'hd-upscale' ? 'bg-purple-950/30 border-purple-500' : 'bg-[#18181b] border-gray-800 hover:border-gray-700'}`}
+              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                selectedAction === 'hd-upscale'
+                  ? 'bg-purple-950/30 border-purple-500'
+                  : 'bg-[#18181b] border-gray-800 hover:border-gray-700'
+              }`}
             >
               <div>
                 <p className="font-medium text-sm text-white">✨ 4K Super Upscale</p>
-                <p className="text-xs text-gray-400 mt-0.5">Re-synthesize pixels and remove noise</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Re-synthesize pixels and remove noise
+                </p>
               </div>
-              <input type="radio" checked={selectedAction === 'hd-upscale'} readOnly className="accent-purple-500" />
+              <input
+                type="radio"
+                checked={selectedAction === 'hd-upscale'}
+                readOnly
+                className="accent-purple-500"
+              />
             </div>
 
-            <div 
+            <div
               onClick={() => setSelectedAction('lighting-boost')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${selectedAction === 'lighting-boost' ? 'bg-purple-950/30 border-purple-500' : 'bg-[#18181b] border-gray-800 hover:border-gray-700'}`}
+              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                selectedAction === 'lighting-boost'
+                  ? 'bg-purple-950/30 border-purple-500'
+                  : 'bg-[#18181b] border-gray-800 hover:border-gray-700'
+              }`}
             >
               <div>
                 <p className="font-medium text-sm text-white">💡 Studio Lighting Boost</p>
                 <p className="text-xs text-gray-400 mt-0.5">Auto-rebalance shadow highlights</p>
               </div>
-              <input type="radio" checked={selectedAction === 'lighting-boost'} readOnly className="accent-purple-500" />
+              <input
+                type="radio"
+                checked={selectedAction === 'lighting-boost'}
+                readOnly
+                className="accent-purple-500"
+              />
             </div>
           </div>
 
@@ -228,9 +249,17 @@ export default function StudioView({
                 <p className="text-sm text-gray-300 font-medium">{statusText}</p>
               </div>
             ) : processedImg ? (
-              <img src={processedImg} alt="Processed result" className="max-h-[380px] object-contain rounded-lg shadow-2xl" />
+              <img
+                src={processedImg}
+                alt="Processed result"
+                className="max-h-[380px] object-contain rounded-lg shadow-2xl"
+              />
             ) : studioImg ? (
-              <img src={studioImg} alt="Original preview" className="max-h-[380px] object-contain rounded-lg opacity-80" />
+              <img
+                src={studioImg}
+                alt="Original preview"
+                className="max-h-[380px] object-contain rounded-lg opacity-80"
+              />
             ) : (
               <div className="text-center text-gray-500 space-y-2">
                 <p className="text-3xl">🖼️</p>
@@ -243,13 +272,17 @@ export default function StudioView({
             <a
               href={processedImg || studioImg || '#'}
               download="pixio-processed.png"
-              className={`flex-1 py-3 px-4 rounded-xl font-medium text-center bg-gray-800 hover:bg-gray-700 transition text-sm flex items-center justify-center gap-2 ${!processedImg && !studioImg ? 'opacity-50 pointer-events-none' : ''}`}
+              className={`flex-1 py-3 px-4 rounded-xl font-medium text-center bg-gray-800 hover:bg-gray-700 transition text-sm flex items-center justify-center gap-2 ${
+                !processedImg && !studioImg ? 'opacity-50 pointer-events-none' : ''
+              }`}
             >
               ⬇️ Download PNG
             </a>
             <button
               onClick={() => alert('Opening in advanced editor...')}
-              className={`flex-1 py-3 px-4 rounded-xl font-medium text-center bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition text-sm flex items-center justify-center gap-2 border border-purple-500/30 ${!processedImg && !studioImg ? 'opacity-50 pointer-events-none' : ''}`}
+              className={`flex-1 py-3 px-4 rounded-xl font-medium text-center bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 transition text-sm flex items-center justify-center gap-2 border border-purple-500/30 ${
+                !processedImg && !studioImg ? 'opacity-50 pointer-events-none' : ''
+              }`}
             >
               ✨ Open in Editor
             </button>

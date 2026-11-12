@@ -1,155 +1,117 @@
+'use client';
+
 import React, { useState } from 'react';
-import { X, Sparkles, Mail, Lock, User, ArrowRight } from 'lucide-react';
 
 export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setErrorMsg('');
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) {
+      setError('Please enter an email address.');
+      return;
+    }
 
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-    const payload = isLogin ? { email, password } : { name, email, password };
+    setLoading(true);
+    setError('');
 
     try {
-      // Attempt backend API call
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
+      const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: name.trim() || cleanEmail.split('@')[0],
+        }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || 'Authentication failed');
+      const text = await res.text();
+      if (!text) {
+        throw new Error(`Server returned an empty response (HTTP ${res.status}). Check app/api/auth/route.ts.`);
       }
 
-      localStorage.setItem('token', data.token);
-      localStorage.setItem('user', JSON.stringify(data.user));
+      const data = JSON.parse(text);
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `Login failed (HTTP ${res.status})`);
+      }
 
-      onAuthSuccess(data.user);
+      await onAuthSuccess({
+        name: data.user.name || cleanEmail.split('@')[0],
+        email: data.user.email,
+      });
+
+      setName('');
+      setEmail('');
       onClose();
     } catch (err) {
-      // Fallback: Enable Instant Demo Login if server is not reachable
-      const demoUser = {
-        id: Date.now().toString(),
-        name: name || email.split('@')[0] || 'Demo User',
-        email: email || 'user@pixio.ai',
-        credits: 20
-      };
-      localStorage.setItem('token', 'demo-jwt-token');
-      localStorage.setItem('user', JSON.stringify(demoUser));
-      
-      onAuthSuccess(demoUser);
-      onClose();
+      setError(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-[#12141C] max-w-md w-full rounded-3xl p-6 border border-white/15 space-y-6 relative shadow-2xl">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer">
-          <X className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-md rounded-2xl bg-[#121218] border border-gray-800 p-6 text-white space-y-6 relative shadow-2xl">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-white text-sm px-2 py-1 rounded-lg hover:bg-white/10"
+        >
+          ✕
         </button>
 
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)] mx-auto">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-          <h3 className="text-2xl font-extrabold text-white">
-            {isLogin ? 'Welcome Back to PIXIO' : 'Create PIXIO Account'}
-          </h3>
+        <div>
+          <h2 className="text-xl font-bold">Sign In or Create Account</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Each email gets its own 10 free credits, gallery, and collage history.
+          </p>
         </div>
 
-        {errorMsg && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs font-semibold text-center">
-            {errorMsg}
+        {error && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+            {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-gray-300">Full Name</label>
-              <div className="relative">
-                <User className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
-                <input
-                  type="text"
-                  required
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#161923] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-400"
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-300">Email Address</label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
-              <input
-                type="email"
-                required
-                placeholder="you@domain.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#161923] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-400"
-              />
-            </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Your Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Thrisha"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#18181f] border border-gray-800 text-sm text-white focus:outline-none focus:border-purple-500"
+            />
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-300">Password</label>
-            <div className="relative">
-              <Lock className="w-4 h-4 text-gray-500 absolute left-3.5 top-3" />
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#161923] border border-white/10 text-xs text-white focus:outline-none focus:border-cyan-400"
-              />
-            </div>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Email Address</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="user1@example.com"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#18181f] border border-gray-800 text-sm text-white focus:outline-none focus:border-purple-500"
+            />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-600 to-indigo-500 text-white font-bold text-sm hover:opacity-90 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+            className="w-full py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 transition disabled:opacity-50"
           >
-            {loading ? (
-              <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-            ) : (
-              <>
-                <span>{isLogin ? 'Sign In to Account' : 'Register Account'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
+            {loading ? 'Signing in...' : 'Continue'}
           </button>
         </form>
-
-        <div className="text-center pt-2 border-t border-white/5">
-          <button
-            onClick={() => setIsLogin(!isLogin)}
-            className="text-xs text-gray-400 hover:text-cyan-400 transition-colors cursor-pointer"
-          >
-            {isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Sign In'}
-          </button>
-        </div>
       </div>
     </div>
   );

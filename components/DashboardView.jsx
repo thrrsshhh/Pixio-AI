@@ -1,73 +1,100 @@
-import React, { useState } from 'react';
-import { Layers, Image as ImageIcon, Trash2, Clock, Plus } from 'lucide-react';
+'use client';
 
-export default function DashboardView({ gallery, setGallery, setActiveTab }) {
-  const [filter, setFilter] = useState('all');
+import React, { useEffect } from 'react';
 
-  const filteredGallery = filter === 'all' 
-    ? gallery 
-    : gallery.filter((item) => item.type === filter);
+export default function DashboardView({
+  user,
+  gallery = [],
+  setGallery,
+  setActiveTab,
+}) {
+  useEffect(() => {
+    const email = user?.email || 'guest@pixio.ai';
+    fetch(`/api/remove-bg?email=${encodeURIComponent(email)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.history)) {
+          setGallery(
+            data.history.map((item) => ({
+              id: item.id,
+              url: item.processedUrl || item.originalUrl,
+              type: item.type,
+              createdAt: new Date(item.createdAt).toLocaleDateString(),
+            }))
+          );
+        }
+      })
+      .catch((err) => console.error('Dashboard fetch error:', err));
+  }, [user, setGallery]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-        <h2 className="text-3xl font-extrabold text-white flex items-center gap-2.5">
-          <Layers className="w-7 h-7 text-pink-400" /> Saved Cloud Gallery
-        </h2>
-
-        <div className="flex gap-1 bg-[#12141C] p-1 rounded-xl border border-white/5">
-          {['all', 'bg_removed', 'collage'].map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer ${
-                filter === f ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              {f === 'bg_removed' ? 'Cutouts' : f}
-            </button>
-          ))}
+    <div className="max-w-7xl mx-auto px-4 py-6 text-white space-y-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold">Saved History & Gallery</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            All your AI cutouts, upscales, and exported collages saved for{' '}
+            <span className="text-purple-400 font-medium">
+              {user?.email || 'guest@pixio.ai'}
+            </span>
+          </p>
         </div>
+
+        <button
+          onClick={() => setActiveTab('studio')}
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-sm font-semibold text-white shadow-lg transition"
+        >
+          + New AI Edit
+        </button>
       </div>
 
-      {filteredGallery.length === 0 ? (
-        <div className="text-center py-16 bg-[#12141C] rounded-2xl border border-white/5 space-y-4">
-          <ImageIcon className="w-12 h-12 text-gray-600 mx-auto" />
-          <p className="text-gray-400 text-sm font-semibold">No assets found in gallery</p>
+      {gallery.length === 0 ? (
+        <div className="bg-[#121218] border border-gray-800 rounded-2xl p-16 text-center space-y-4">
+          <p className="text-4xl">🖼️</p>
+          <h3 className="text-lg font-semibold text-gray-200">No saved edits yet</h3>
+          <p className="text-sm text-gray-400 max-w-md mx-auto">
+            Process a photo in AI Studio or export a collage in the Collage Editor to see it saved here.
+          </p>
           <button
-            onClick={() => setActiveTab && setActiveTab('studio')}
-            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            onClick={() => setActiveTab('studio')}
+            className="px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-sm font-semibold transition"
           >
-            <Plus className="w-4 h-4" /> Create New AI Output
+            Go to AI Studio
           </button>
         </div>
       ) : (
-        <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-6">
-          {filteredGallery.map((item) => (
-            <div key={item.id} className="bg-[#12141C] rounded-2xl overflow-hidden border border-white/10 p-3 space-y-3">
-              <div className="h-48 rounded-xl overflow-hidden bg-slate-950 relative">
-                <img src={item.url} alt={item.title} className="w-full h-full object-cover" />
-                <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/20 text-[10px] font-bold text-white uppercase">
-                  {item.type === 'collage' ? 'Collage' : 'AI Cutout'}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center pt-1">
-                <div>
-                  <h4 className="text-sm font-bold text-white">{item.title}</h4>
-                  <span className="text-[10px] text-gray-400 flex items-center gap-1 mt-0.5">
-                    <Clock className="w-3 h-3 text-cyan-400" /> {item.createdAt}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {gallery.map((item, idx) => {
+            const imgSrc = item.url || item.processedUrl || item.originalUrl;
+            return (
+              <div
+                key={item.id || idx}
+                className="bg-[#121218] border border-gray-800 rounded-2xl overflow-hidden flex flex-col justify-between group"
+              >
+                <div className="relative h-56 bg-[#09090b] flex items-center justify-center p-4">
+                  <img
+                    src={imgSrc}
+                    alt={item.type || 'Saved edit'}
+                    className="max-h-full object-contain rounded-lg"
+                  />
+                  <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-black/75 border border-white/10 text-[11px] font-semibold uppercase text-purple-300">
+                    {item.type || 'edit'}
                   </span>
                 </div>
-                <button
-                  onClick={() => setGallery(gallery.filter((g) => g.id !== item.id))}
-                  className="text-red-400 hover:text-red-300 p-2 rounded-lg bg-red-500/10 transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+
+                <div className="p-4 border-t border-gray-800 flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-500">{item.createdAt || 'Saved'}</span>
+                  <a
+                    href={imgSrc}
+                    download={`pixio-${item.type || 'edit'}-${item.id || idx}.png`}
+                    className="px-4 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-white transition"
+                  >
+                    ⬇ Download HD
+                  </a>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
